@@ -18,120 +18,124 @@ const excludedBones = new Set([
   'mixamorigLeftFoot', 'mixamorigLeftToeBase', 'mixamorigRightFoot', 'mixamorigRightToeBase'
 ]);
 
-const camera = new PerspectiveCameraAuto(50, 0.1, 100);
-const scene = new Scene();
-const main = new Main();
-main.createView({ scene, camera, enabled: false, backgroundColor: 0x99ddff });
+async function start(): Promise<void> {
+  const camera = new PerspectiveCameraAuto(50, 0.1, 100);
+  const scene = new Scene();
+  const main = new Main();
+  main.createView({ scene, camera, enabled: false, backgroundColor: 0x99ddff });
 
-const glb = await Asset.load<GLTF>(GLTFLoader, 'https://threejs.org/examples/models/gltf/Soldier.glb');
-const soldierGroup = glb.scene.children[0];
-const soldierScale = soldierGroup.scale.x;
-const dummy = soldierGroup.children[0] as Mesh<BufferGeometry, MeshStandardMaterial>;
-soldierGroup.children[1].visible = false;
-dummy.removeFromParent();
+  const glb = await Asset.load<GLTF>(GLTFLoader, 'https://threejs.org/examples/models/gltf/Soldier.glb');
+  const soldierGroup = glb.scene.children[0];
+  const soldierScale = soldierGroup.scale.x;
+  const dummy = soldierGroup.children[0] as Mesh<BufferGeometry, MeshStandardMaterial>;
+  soldierGroup.children[1].visible = false;
+  dummy.removeFromParent();
 
-const mixer = new AnimationMixer(glb.scene);
-const action = mixer.clipAction(glb.animations[1]).play();
+  const mixer = new AnimationMixer(glb.scene);
+  const action = mixer.clipAction(glb.animations[1]).play();
 
-// SIMPLIFY ACTION FOR LODs
-const propertyBindings = (action as any)._propertyBindings as PropertyMixer[];
-const interpolants = (action as any)._interpolants as Interpolant[];
-const propertyBindingsLOD: PropertyMixer[] = [];
-const interpolantsLOD: Interpolant[] = [];
+  // SIMPLIFY ACTION FOR LODs
+  const propertyBindings = (action as any)._propertyBindings as PropertyMixer[];
+  const interpolants = (action as any)._interpolants as Interpolant[];
+  const propertyBindingsLOD: PropertyMixer[] = [];
+  const interpolantsLOD: Interpolant[] = [];
 
-for (let i = 0; i < propertyBindings.length; i++) {
-  const boneName = propertyBindings[i].binding.node.name as string;
+  for (let i = 0; i < propertyBindings.length; i++) {
+    const boneName = propertyBindings[i].binding.node.name as string;
 
-  if (!excludedBones.has(boneName)) {
-    propertyBindingsLOD.push(propertyBindings[i]);
-    interpolantsLOD.push(interpolants[i]);
-  }
-}
-
-const geometry = dummy.geometry;
-dummy.geometry = await createSimplifiedGeometry(geometry, { ratio: 0.1, error: 1, lockBorder: true });
-
-// CREATE INSTANCEDMESH2 AND LODS
-const count = 10000;
-const soldiers = InstancedMesh2.createFrom<{ time: number; speed: number; offset: number }>(dummy, { capacity: count, createEntities: true });
-soldiers.boneTexture.maxUpdateCalls = 800;
-
-soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.07, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 10);
-soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.05, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 20);
-soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.03, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 30);
-soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.02, error: 1, prune: true }), dummy.material.clone(), (1 / soldierScale) * 40);
-
-// ADD INSTANCES
-soldiers.addInstances(count, (obj, index) => {
-  obj.position.set(Math.random() * 100 - 50, Math.random() * -400 + 200, 0).divideScalar(soldierScale);
-  obj.color = `hsl(${Math.random() * 360}, 50%, 75%)`;
-  obj.time = 0;
-  obj.offset = Math.random() * 5;
-  obj.speed = Math.random() * 0.5 + 1;
-});
-
-// INIT SKELETON DATA
-for (const soldier of soldiers.instances) {
-  mixer.setTime(soldier.offset);
-  soldier.updateBones();
-}
-
-// ANIMATE INSTANCES
-let delta = 0;
-let total = 0;
-const radiusMovement = 30;
-const invMatrixWorld = new Matrix4();
-const cameraLocalPosition = new Vector3();
-scene.on('animate', (e) => {
-  delta = e.delta;
-  total = e.total;
-  const time = e.total * 2 + 30;
-  camera.position.set(Math.sin(time / 10) * radiusMovement, 3 + Math.cos(time / 5), Math.cos(time / 10) * radiusMovement);
-  camera.lookAt(0, 0, 0);
-  camera.updateMatrixWorld();
-
-  invMatrixWorld.copy(soldiers.matrixWorld).invert();
-  cameraLocalPosition.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(invMatrixWorld);
-});
-
-// UPDATE ONLY INSTANCES INSIDE FRUSTUM SETTINGS FPS BASED ON CAMERA DISTANCE
-const maxFps = 60;
-const minFps = 0;
-soldiers.onFrustumEnter = (index, camera, cameraLOD, LODindex) => {
-  const soldier = soldiers.instances[index];
-  const cameraDistance = cameraLocalPosition.distanceTo(soldier.position) * soldierScale;
-  const fps = Math.min(maxFps, Math.max(minFps, 70 - cameraDistance));
-  soldier.time += delta;
-
-  if (soldier.time >= 1 / fps) {
-    soldier.time %= 1 / fps;
-
-    if (LODindex === 0) {
-      (mixer as any)._bindings = propertyBindings;
-      (mixer as any)._nActiveBindings = propertyBindings.length;
-      (action as any)._propertyBindings = propertyBindings;
-      (action as any)._interpolants = interpolants;
-      mixer.setTime(total * soldier.speed + soldier.offset);
-      soldier.updateBones();
-    } else {
-      // use simplified action
-      (mixer as any)._bindings = propertyBindingsLOD;
-      (mixer as any)._nActiveBindings = propertyBindingsLOD.length;
-      (action as any)._propertyBindings = propertyBindingsLOD;
-      (action as any)._interpolants = interpolantsLOD;
-      mixer.setTime(total * soldier.speed + soldier.offset);
-      soldier.updateBones(true, excludedBones);
+    if (!excludedBones.has(boneName)) {
+      propertyBindingsLOD.push(propertyBindings[i]);
+      interpolantsLOD.push(interpolants[i]);
     }
   }
 
-  return true;
-};
+  const geometry = dummy.geometry;
+  dummy.geometry = await createSimplifiedGeometry(geometry, { ratio: 0.1, error: 1, lockBorder: true });
 
-const hemi = new HemisphereLight(0x99ddff, 0x669933, 5);
-const dirLight = new DirectionalLight('white', 5);
-const ground = new Mesh(new PlaneGeometry(200, 200), new MeshStandardMaterial({ color: 0x082000 }));
-ground.rotation.x = -Math.PI / 2;
+  // CREATE INSTANCEDMESH2 AND LODS
+  const count = 10000;
+  const soldiers = InstancedMesh2.createFrom<{ time: number; speed: number; offset: number }>(dummy, { capacity: count, createEntities: true });
+  soldiers.boneTexture.maxUpdateCalls = 800;
 
-soldierGroup.add(soldiers);
-scene.add(hemi, dirLight, glb.scene, ground);
-scene.fog = new Fog(0x99ddff, 90, 100);
+  soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.07, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 10);
+  soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.05, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 20);
+  soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.03, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 30);
+  soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.02, error: 1, prune: true }), dummy.material.clone(), (1 / soldierScale) * 40);
+
+  // ADD INSTANCES
+  soldiers.addInstances(count, (obj, index) => {
+    obj.position.set(Math.random() * 100 - 50, Math.random() * -400 + 200, 0).divideScalar(soldierScale);
+    obj.color = `hsl(${Math.random() * 360}, 50%, 75%)`;
+    obj.time = 0;
+    obj.offset = Math.random() * 5;
+    obj.speed = Math.random() * 0.5 + 1;
+  });
+
+  // INIT SKELETON DATA
+  for (const soldier of soldiers.instances) {
+    mixer.setTime(soldier.offset);
+    soldier.updateBones();
+  }
+
+  // ANIMATE INSTANCES
+  let delta = 0;
+  let total = 0;
+  const radiusMovement = 30;
+  const invMatrixWorld = new Matrix4();
+  const cameraLocalPosition = new Vector3();
+  scene.on('animate', (e) => {
+    delta = e.delta;
+    total = e.total;
+    const time = e.total * 2 + 30;
+    camera.position.set(Math.sin(time / 10) * radiusMovement, 3 + Math.cos(time / 5), Math.cos(time / 10) * radiusMovement);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+
+    invMatrixWorld.copy(soldiers.matrixWorld).invert();
+    cameraLocalPosition.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(invMatrixWorld);
+  });
+
+  // UPDATE ONLY INSTANCES INSIDE FRUSTUM SETTINGS FPS BASED ON CAMERA DISTANCE
+  const maxFps = 60;
+  const minFps = 0;
+  soldiers.onFrustumEnter = (index, camera, cameraLOD, LODindex) => {
+    const soldier = soldiers.instances[index];
+    const cameraDistance = cameraLocalPosition.distanceTo(soldier.position) * soldierScale;
+    const fps = Math.min(maxFps, Math.max(minFps, 70 - cameraDistance));
+    soldier.time += delta;
+
+    if (soldier.time >= 1 / fps) {
+      soldier.time %= 1 / fps;
+
+      if (LODindex === 0) {
+        (mixer as any)._bindings = propertyBindings;
+        (mixer as any)._nActiveBindings = propertyBindings.length;
+        (action as any)._propertyBindings = propertyBindings;
+        (action as any)._interpolants = interpolants;
+        mixer.setTime(total * soldier.speed + soldier.offset);
+        soldier.updateBones();
+      } else {
+        // use simplified action
+        (mixer as any)._bindings = propertyBindingsLOD;
+        (mixer as any)._nActiveBindings = propertyBindingsLOD.length;
+        (action as any)._propertyBindings = propertyBindingsLOD;
+        (action as any)._interpolants = interpolantsLOD;
+        mixer.setTime(total * soldier.speed + soldier.offset);
+        soldier.updateBones(true, excludedBones);
+      }
+    }
+
+    return true;
+  };
+
+  const hemi = new HemisphereLight(0x99ddff, 0x669933, 5);
+  const dirLight = new DirectionalLight('white', 5);
+  const ground = new Mesh(new PlaneGeometry(200, 200), new MeshStandardMaterial({ color: 0x082000 }));
+  ground.rotation.x = -Math.PI / 2;
+
+  soldierGroup.add(soldiers);
+  scene.add(hemi, dirLight, glb.scene, ground);
+  scene.fog = new Fog(0x99ddff, 90, 100);
+}
+
+start();
