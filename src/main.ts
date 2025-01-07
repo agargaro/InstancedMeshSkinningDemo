@@ -95,9 +95,14 @@ async function start(): Promise<void> {
     cameraLocalPosition.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(invMatrixWorld);
   });
 
+  (mixer as any)._bindings = propertyBindingsLOD;
+  (mixer as any)._nActiveBindings = propertyBindingsLOD.length;
+  (action as any)._propertyBindings = propertyBindingsLOD;
+  (action as any)._interpolants = interpolantsLOD;
+
   // UPDATE ONLY INSTANCES INSIDE FRUSTUM SETTINGS FPS BASED ON CAMERA DISTANCE
   const maxFps = 60;
-  const minFps = 10;
+  const minFps = 5;
   soldiers.onFrustumEnter = (index, camera, cameraLOD, LODindex) => {
     const soldier = soldiers.instances[index];
     const cameraDistance = cameraLocalPosition.distanceTo(soldier.position) * soldierScale;
@@ -106,23 +111,8 @@ async function start(): Promise<void> {
 
     if (soldier.time >= 1 / fps) {
       soldier.time %= 1 / fps;
-
-      if (LODindex === 0) {
-        (mixer as any)._bindings = propertyBindings;
-        (mixer as any)._nActiveBindings = propertyBindings.length;
-        (action as any)._propertyBindings = propertyBindings;
-        (action as any)._interpolants = interpolants;
-        mixer.setTime(total * soldier.speed + soldier.offset);
-        soldier.updateBones();
-      } else {
-        // use simplified action
-        (mixer as any)._bindings = propertyBindingsLOD;
-        (mixer as any)._nActiveBindings = propertyBindingsLOD.length;
-        (action as any)._propertyBindings = propertyBindingsLOD;
-        (action as any)._interpolants = interpolantsLOD;
-        mixer.setTime(total * soldier.speed + soldier.offset);
-        soldier.updateBones(true, excludedBones);
-      }
+      mixer.setTime(total * soldier.speed + soldier.offset);
+      soldier.updateBones(true, excludedBones);
     }
 
     return true;
