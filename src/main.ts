@@ -55,7 +55,6 @@ async function start(): Promise<void> {
   // CREATE INSTANCEDMESH2 AND LODS
   const count = 3000;
   const soldiers = InstancedMesh2.createFrom<{ time: number; speed: number; offset: number }>(dummy, { capacity: count, createEntities: true });
-  soldiers.boneTexture.partialUpdate = false;
 
   soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.07, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 10);
   soldiers.addLOD(await createSimplifiedGeometry(geometry, { ratio: 0.05, error: 1 }), dummy.material.clone(), (1 / soldierScale) * 30);
